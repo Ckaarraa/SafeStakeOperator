@@ -27,6 +27,11 @@ SafeStake is a decentralized validation framework for performing ETH2 duties and
 * [install docker engine](https://docs.docker.com/engine/install/)
 * [install docker compose](https://docs.docker.com/compose/install/)
 
+### Start your docker engine
+```
+sudo systemctl start docker
+```
+
 ### Create local volume directory
 
 ```
