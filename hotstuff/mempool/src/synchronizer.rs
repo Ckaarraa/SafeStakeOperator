@@ -45,7 +45,9 @@ pub struct Synchronizer {
     /// It also keeps the round number and a timestamp (`u128`) of each request we sent.
     pending: HashMap<Digest, (Round, Sender<()>, u128)>,
     /// validator id.
-    validator_id: u64
+    validator_id: u64,
+    /// Exit
+    exit: exit_future::Exit
 }
 
 impl Synchronizer {
@@ -58,7 +60,8 @@ impl Synchronizer {
         sync_retry_delay: u64,
         sync_retry_nodes: usize,
         rx_message: Receiver<ConsensusMempoolMessage>,
-        validator_id: u64
+        validator_id: u64,
+        exit: exit_future::Exit
     ) {
         tokio::spawn(async move {
             Self {
@@ -72,7 +75,8 @@ impl Synchronizer {
                 network: SimpleSender::new(),
                 round: Round::default(),
                 pending: HashMap::new(),
-                validator_id: validator_id
+                validator_id: validator_id,
+                exit: exit
             }
             .run()
             .await;
@@ -103,6 +107,7 @@ impl Synchronizer {
         tokio::pin!(timer);
 
         loop {
+            let exit = self.exit.clone();
             tokio::select! {
                 // Handle consensus' messages.
                 Some(message) = self.rx_message.recv() => match message {
@@ -145,7 +150,7 @@ impl Synchronizer {
                         
                         let dvf_message = DvfMessage { validator_id: self.validator_id, message: serialized};
                         let serialized_msg = bincode::serialize(&dvf_message).unwrap();
-                        info!("[MemSYNC] Sending to {:?}", address);
+                        debug!("[MemSYNC] Sending to {:?}", address);
                         self.network.send(address, Bytes::from(serialized_msg)).await;
                     },
                     ConsensusMempoolMessage::Cleanup(round) => {
@@ -215,6 +220,10 @@ impl Synchronizer {
                     // Reschedule the timer.
                     timer.as_mut().reset(Instant::now() + Duration::from_millis(TIMER_RESOLUTION));
                 },
+                () = exit => {
+                    info!("Shutting down Synchronizer");
+                    break;
+                }
             }
         }
     }

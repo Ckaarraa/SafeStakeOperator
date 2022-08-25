@@ -7,7 +7,7 @@ use crypto::Hash as _;
 use crypto::{Digest, PublicKey};
 use futures::stream::futures_unordered::FuturesUnordered;
 use futures::stream::StreamExt as _;
-use log::{debug, error, info};
+use log::{debug, error};
 use network::{SimpleSender, DvfMessage};
 use std::collections::{HashMap, HashSet};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -33,7 +33,8 @@ impl Synchronizer {
         store: Store,
         tx_loopback: Sender<Block>,
         sync_retry_delay: u64,
-        validator_id: u64
+        validator_id: u64,
+        exit: exit_future::Exit
     ) -> Self {
         let mut network = SimpleSender::new();
         let (tx_inner, mut rx_inner): (_, Receiver<Block>) = channel(CHANNEL_CAPACITY);
@@ -47,6 +48,7 @@ impl Synchronizer {
             let timer = sleep(Duration::from_millis(TIMER_ACCURACY));
             tokio::pin!(timer);
             loop {
+                let exit = exit.clone();
                 tokio::select! {
                     Some(block) = rx_inner.recv() => {
                         if pending.insert(block.digest()) {
@@ -70,7 +72,7 @@ impl Synchronizer {
                                     .expect("Failed to serialize sync request");
                                 let dvf_message = DvfMessage { validator_id: validator_id, message: message};
                                 let serialized_msg = bincode::serialize(&dvf_message).unwrap();
-                                info!("[SYNC] Sending to {:?}", address);
+                                debug!("[SYNC] Sending to {:?}", address);
                                 network.send(address, Bytes::from(serialized_msg)).await;
                             }
                         }
@@ -104,11 +106,14 @@ impl Synchronizer {
                                     .expect("Failed to serialize sync request");
                                 let dvf_message = DvfMessage { validator_id: validator_id, message: message};
                                 let serialized_msg = bincode::serialize(&dvf_message).unwrap();
-                                info!("[SYNC] Broacasting to {:?}", addresses);
+                                debug!("[SYNC] Broacasting to {:?}", addresses);
                                 network.broadcast(addresses, Bytes::from(serialized_msg)).await;
                             }
                         }
                         timer.as_mut().reset(Instant::now() + Duration::from_millis(TIMER_ACCURACY));
+                    },
+                    () = exit => {
+                        break;
                     }
                 }
             }

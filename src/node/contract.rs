@@ -11,7 +11,7 @@ use log::{info, error};
 use tokio::sync::{mpsc};
 use std::sync::{Arc};
 use tokio::sync::RwLock;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::{File,remove_file};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -124,9 +124,12 @@ impl ListenContract {
     channel: mpsc::Sender<ValidatorCommand>,
     validators_map: Arc<RwLock<HashMap<u64, Validator>>>,
     validator_operators_map: Arc<RwLock<HashMap<u64, Vec<Operator>>>>,
-    base_dir: PathBuf
+    base_dir: PathBuf,
+    ethlog_hashset: Arc<RwLock<HashSet<H256>>>
   ) {
+    
     tokio::spawn(async move {
+      tokio::time::sleep(Duration::from_secs(60 * 3)).await;
       let contract = Self {
         node_public_key,
         channel,
@@ -161,40 +164,50 @@ impl ListenContract {
               topics(Some(vec![added_topic.clone(), deleted_topic.clone()]), None, None, None)
               .from_block(BlockNumber::Number(U64::from(contract_record.block_num as u64)))
               .build();
-            let logs = web3.eth().logs(filter).await.unwrap();
-            info!("get {} logs", &logs.len());
-            if logs.len() == 0 {
-              contract_record.block_num = web3.eth().block_number().await.unwrap().as_u64();
-            }
-            for log in logs {
-              contract_record.block_num = log.block_number.unwrap().as_u64() + 1;
-              if log.topics[0] == added_topic {
-                info!("added topic");
-                contract.process_validator_add_or_update_event(log, &added_topic, ValidatorEventType::ADDED).await;
-              } else if log.topics[0] == deleted_topic {
-                info!("deleted topic");
-                contract.process_validator_deleted_event(log, &deleted_topic).await;
-              } else {
-                error!("unkown topic");
+            match web3.eth().logs(filter).await {
+              Ok(logs) => {
+                info!("get {} logs", &logs.len());
+                contract_record.block_num = web3.eth().block_number().await.unwrap().as_u64();
+                for log in logs {
+                  let hash = log.transaction_hash.unwrap();
+                  let log_hashset = ethlog_hashset.read().await;
+                  if log_hashset.contains(&hash) {
+                    info!("this log has been listened, don't do anything");
+                    continue;
+                  }
+                  if log.topics[0] == added_topic {
+                    info!("added topic");
+                    contract.process_validator_add_or_update_event(log, &added_topic, ValidatorEventType::ADDED).await;
+                  } else if log.topics[0] == deleted_topic {
+                    info!("deleted topic");
+                    contract.process_validator_deleted_event(log, &deleted_topic).await;
+                  } else {
+                    error!("unkown topic");
+                  }
+                }
+                if contract_record_path.exists() {
+                  remove_file(&contract_record_path).unwrap();
+                }
+                contract_record.to_file(&contract_record_path);
+              },
+              Err(_) => {
+                error!("can't get logs from infura");
+                continue;
               }
-            }
-            if contract_record_path.exists() {
-              remove_file(&contract_record_path).unwrap();
-            }
-            contract_record.to_file(&contract_record_path);
+            };
           }
         }
       }
     });
   }
 
-
   pub fn spawn (
     config: ContractConfig,
     node_public_key: Vec<u8>,
     channel: mpsc::Sender<ValidatorCommand>,
     validators_map: Arc<RwLock<HashMap<u64, Validator>>>,
-    validator_operators_map: Arc<RwLock<HashMap<u64, Vec<Operator>>>>
+    validator_operators_map: Arc<RwLock<HashMap<u64, Vec<Operator>>>>,
+    ethlog_hashset: Arc<RwLock<HashSet<H256>>>
   ) {
 
     tokio::spawn(async move {
@@ -220,6 +233,9 @@ impl ListenContract {
           // let eth_log = sub.try_next().await.unwrap().unwrap();
           match sub.try_next().await.unwrap() {
             Some(eth_log) => {
+              let hash = eth_log.transaction_hash.unwrap();
+              let mut log_set = ethlog_hashset.write().await;
+              let _ = log_set.insert(hash);
               if eth_log.topics[0] == added_topic {
                 info!("added topic");
                 listen_contract.process_validator_add_or_update_event(eth_log, &added_topic, ValidatorEventType::ADDED).await;
@@ -344,10 +360,10 @@ impl ListenContract {
   }
 
   pub async fn process_validator_deleted(&self, eth_log: web3::ethabi::Log) {
-    // let address = match &eth_log.params[0].value {
-    //   token::Token::Address(address) => Some(address),
-    //   _ => None
-    // }.unwrap();
+    let address = match &eth_log.params[0].value {
+      token::Token::Address(address) => Some(address),
+      _ => None
+    }.unwrap();
 
     let public_key = match &eth_log.params[1].value {
       token::Token::Bytes(public_key) => Some(public_key),
@@ -362,7 +378,12 @@ impl ListenContract {
         let _ = self.channel.send(ValidatorCommand::Stop (validator)).await;
       }, 
       None => {
-        info!("self is not included in this validator, doing nothing");
+        let validator = Validator {
+          id: validator_id,
+          validator_address: address.clone(),
+          validator_public_key: public_key.clone()
+        };
+        let _ = self.channel.send(ValidatorCommand::Stop(validator)).await;
       }
     }
   }

@@ -21,6 +21,7 @@ use crate::node::dvfcore::{DvfSigner, DvfPerformanceRequest};
 use crate::node::config::{API_ADDRESS};
 pub use web3signer::Web3SignerObject;
 use chrono::prelude::*;
+use crate::validation::eth2_keystore_share::keystore_share::KeystoreShare;
 
 mod web3signer;
 
@@ -95,9 +96,9 @@ pub enum SigningMethod {
     },
     /// A validator whose key is distributed among a set of operators.
     DistributedKeystore {
-        //voting_keystore_path: PathBuf,
-        voting_keystore_lockfile: Mutex<Option<Lockfile>>,
-        //voting_keystore: Keystore,
+        voting_keystore_share_path: PathBuf,
+        voting_keystore_share_lockfile: Mutex<Option<Lockfile>>,
+        voting_keystore_share: KeystoreShare,
         voting_public_key: PublicKey,
         dvf_signer: DvfSigner,
     },
@@ -235,8 +236,7 @@ impl SigningMethod {
             SigningMethod::DistributedKeystore { dvf_signer, .. } => {
                 let _timer =
                     metrics::start_timer_vec(&metrics::SIGNING_TIMES, &[metrics::LOCAL_KEYSTORE]);
-
-                if dvf_signer.is_leader(signing_context.epoch.as_u64()).await {
+                if dvf_signer.is_leader(SigningMethod::convert_signingroot_to_u64(&signing_root)).await {
                     log::info!("[Dvf {}/{}] Signing for root: {:?}. Epoch: {}", 
                                dvf_signer.operator_id, 
                                dvf_signer.operator_committee.validator_id(), 
@@ -248,10 +248,10 @@ impl SigningMethod {
                     
                     let (slot, duty) = match signable_message {
                         SignableMessage::AttestationData(a) => {
-                            (a.slot, "PROPOSER")
+                            (a.slot, "ATTESTER")
                         },
                         SignableMessage::BeaconBlock(b) => {
-                            (b.slot(), "ATTESTER")
+                            (b.slot(), "PROPOSER")
                         },
                         _ => { (Slot::new(0 as u64), "ERROR") }
                     };
@@ -288,6 +288,17 @@ impl SigningMethod {
                 }
             }
         }
+    }
+
+    pub fn convert_signingroot_to_u64(signing_root: &types::Hash256) -> u64 {
+        let mut little_endian: [u8; 8] = [0; 8];
+        let mut i = 0;
+        for elem in little_endian.iter_mut() {
+            *elem = signing_root.0[i];
+            i = i + 1;
+        } 
+        let nonce = u64::from_le_bytes(little_endian);
+        nonce 
     }
 }
 

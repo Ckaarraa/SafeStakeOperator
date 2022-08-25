@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use validator_dir::insecure_keys::{INSECURE_PASSWORD,};
 use eth2_keystore::{
     json_keystore::{Kdf, Scrypt},
-    Keystore, KeystoreBuilder, PlainText, DKLEN,
+    KeystoreBuilder, PlainText, DKLEN,
 };
 use std::fs::{create_dir_all, File};
 use filesystem::create_with_600_perms;
@@ -53,9 +53,10 @@ impl ShareBuilder {
         self
     }
 
-    /// Return the path to the validator dir to be built, i.e. `base_dir/pubkey`.
-    pub fn get_dir_path(base_validators_dir: &Path, voting_keystore_share: &Keystore) -> PathBuf {
-        base_validators_dir.join(format!("0x{}", voting_keystore_share.pubkey()))
+    /// Return the path to the validator dir to be built, i.e. `base_dir/pubkey/operator_id`.
+    pub fn get_dir_path(base_validators_dir: &Path, voting_keystore_share: &KeystoreShare) -> PathBuf {
+        //base_validators_dir.join(format!("0x{}", voting_keystore_share.pubkey()))
+        default_keystore_share_dir(voting_keystore_share, base_validators_dir)
     }
 
     /// Consumes `self`, returning a `ValidatorDir` if no error is encountered.
