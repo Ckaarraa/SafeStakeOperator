@@ -60,7 +60,7 @@ enr configure
 cd dvf
 vim .env
 ```
-### Build operator image
+### Build operator images
 ```
 sudo docker compose -f  docker-compose-operator.yml build
 ```
