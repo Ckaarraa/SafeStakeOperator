@@ -2,8 +2,11 @@ version: '3'
 services:
   dvf_root_node:
     network_mode: "host"
-    image: parastate/dvf-operator:test
-    pull_policy: always
+    build: 
+      context: .
+      args:
+        CPU_NUM: 8
+      dockerfile: Dockerfile
     command: "boot"
     expose:
       - "9005"

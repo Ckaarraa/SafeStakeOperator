@@ -55,8 +55,11 @@ services:
     network_mode: "host"
     volumes:
       - operator-data:/root/.lighthouse
-    image: parastate/dvf-operator:test
-    pull_policy: always
+    build:
+      context: .
+      args:
+        CPU_NUM: 8
+      dockerfile: Dockerfile
     command: "${ENR}"
     expose:
       - "25000"
