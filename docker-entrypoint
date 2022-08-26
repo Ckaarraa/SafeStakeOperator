@@ -6,7 +6,7 @@ if [[ "$START_PRO" == "boot" ]]; then
   /usr/local/bin/dvf_root_node $NODE_IP 9005 2>&1
 elif [[ -n "$START_PRO" && "$START_PRO" != "boot" ]]; then
   /usr/local/bin/dvf validator_client \
-    --debug-level debug \
+    --debug-level info \
     --network ropsten \
     --beacon-nodes http://127.0.0.1:5052 \
     --api https://api-test.safestake.xyz/v1/collect_performance \
